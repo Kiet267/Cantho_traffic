@@ -15,6 +15,7 @@ global{
 	geometry shape <- envelope(map_osm_file);
 	graph road_network;
 	float step <- 0.036 #s;
+	string scenario <- "High";
 	
 	init{
 		write "read data";
@@ -68,14 +69,31 @@ global{
 		//free osm_agent
 		ask osm_agent{do die;}
 		
+		int nb_moto <- 0;
+		int nb_car <- 0;
+		int nb_truck <- 0;
 		write "done";
-		create motobike number: 100{
+		if(scenario = "High"){
+			nb_moto <- 200;
+			nb_car <- 100;
+			nb_truck <- 30;
+		}else if(scenario = "Mid"){
+			nb_moto <- 100;
+			nb_car <- 50;
+			nb_truck <- 15;
+		}else{
+			nb_moto <- 40;
+			nb_car <- 15;
+			nb_truck <- 5;
+		}
+		
+		create motobike number: nb_moto{
 			location <- any_location_in(one_of(road));
 		}
-		create car number: 50{
+		create car number: nb_car{
 			location <- any_location_in(one_of(road));
 		}
-		create truck number: 20{
+		create truck number: nb_truck{
 			location <- any_location_in(one_of(road));
 		}
 	}
@@ -211,13 +229,16 @@ species traffic_light skills: [intersection_skill]{
 		if (is_traffic_signal) {
 			draw circle(1) color: color_fire;
 		} else {
-			//draw circle(1) color: color;
+			draw circle(1) color: color;
 		}
 
 	}
 }
 
 experiment test type: gui {
+	parameter "Choose scenario:" var: scenario among:[
+		"High","Mid","Low"
+	];
 	
 	output{
 		display test type: 3d background: #lightskyblue axes: false{
