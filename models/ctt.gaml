@@ -24,8 +24,12 @@ global{
 		
 		//filter roads
 		list<geometry> roads <- [];
+		list<geometry> signals_geom <- [];
 		ask osm_agent{
-			if(shape.attributes contains_key "highway"){
+			if(shape.attributes["highway"] = "traffic_signals"){
+				signals_geom << shape;
+			}
+			if(shape.attributes contains_key "highway" and not (string(shape.attributes["highway"]) contains "_link")){
 				roads << shape;
 			}
 		}
@@ -36,27 +40,24 @@ global{
 		
 		//create graph
 		graph temp_graph <- as_edge_graph(road);
-		
 		loop v over: temp_graph.vertices{
-			create traffic_light with: [shape::point(v)];
-		}
-		
-		road_network <- as_driving_graph(road, traffic_light);
-		
-		ask traffic_light{
-			if(length(roads_in)>=2){
-				is_traffic_signal <- true;
-				do compute_crossing;
-				stop << [];
-				if(flip(0.5)){
-					do to_green;
-				}else{
-					do to_red;
-				}
-			}else{
+			create intersection with: [shape::point(v)]{
 				is_traffic_signal <- false;
 			}
 		}
+		
+		road_network <- as_driving_graph(road, intersection);
+		loop sg over: signals_geom {
+			intersection target_node <- (intersection ) closest_to sg;
+			if (target_node != nil) {
+				ask target_node {
+					is_traffic_signal <- true;
+					do compute_crossing;
+					if (flip(0.5)) { do to_green; } else { do to_red; }
+				}
+			}
+		}
+		
 		
 		ask osm_agent{
 			if(shape.attributes contains_key "building"){
@@ -103,6 +104,9 @@ global{
 species osm_agent {}
 
 species road skills: [road_skill]{
+	int lanes <-3;
+	int num_lanes <- 3;
+	float width <- 9.0;
 	aspect default{
 		draw shape color: #black;
 	}
@@ -120,17 +124,39 @@ species vehicle skills: [driving]{
 		safety_distance_coeff <- 3.0;
 	}
 	//find road
-	reflex pick_target when: final_target = nil{
-		final_target <- one_of(traffic_light);
-		do compute_path graph: road_network target: final_target;
-	}
-	
-	reflex move when: final_target != nil{	
-		do drive;
+	reflex move {	
+		//run random
+		if(current_path = nil or final_target = nil){
+			final_target <- one_of(intersection);
+			if(final_target != nil){
+				do compute_path graph: road_network target: final_target;
+			}
+		}
+		//if end of road -> relocate 
 		if(current_path = nil){
+			location <- any_location_in(one_of(road));
 			final_target <- nil;
+		}else{
+			do drive;
 		}
 	}
+	point compute_position{
+		if (current_road != nil) {
+			float road_width <- road(current_road).width;
+			int n_lanes <- road(current_road).num_lanes;
+			float lane_w <- road_width / n_lanes;
+			
+			//calculate pos for the vehicle(shift from the center)
+			float dist_from_left_edge <- (n_lanes - lowest_lane - 0.5) * lane_w;
+			float center_offset <- dist_from_left_edge - (road_width / 2);
+			float final_dist <- -center_offset;
+			
+			point shift_pt <- {cos(heading + 90) * final_dist, sin(heading + 90) * final_dist};
+			return location + shift_pt;
+		} else {
+			return location;
+		}
+		}
 }
 
 species motobike parent: vehicle{
@@ -140,7 +166,8 @@ species motobike parent: vehicle{
 		speed <- max_speed;
 	}
 	aspect default{
-		draw box(2, 1, 1) color: #green rotate: heading;
+		point pos <- compute_position();
+		draw box(2, 1, 1) color: #green rotate: heading at: {pos.x, pos.y, 0.5};
 	}
 }
 
@@ -151,7 +178,8 @@ species car parent: vehicle{
 		speed <- max_speed;
 	}
 	aspect default{
-		draw box(4,2,2) color: #red rotate: heading;
+		point pos <- compute_position();
+		draw box(4,2,2) color: #red rotate: heading at: {pos.x, pos.y, 1};
 	}
 }
 
@@ -162,23 +190,25 @@ species truck parent: vehicle{
 		speed <- max_speed;
 	}
 	aspect default{
-		draw box(6,3,3) color: #blue rotate: heading;
+		point pos <- compute_position();
+		draw box(6,3,3) color: #blue rotate: heading at: {pos.x, pos.y, 1.5};
 	}
 }
 
-species traffic_light skills: [intersection_skill]{
+species intersection skills: [intersection_skill]{
 	bool is_green;
 	bool is_traffic_signal;
 	float time_to_change <- 60 #s;
 	float counter <- rnd(time_to_change);
-	list<road> ways1;
-	list<road> ways2;
+	list<road> ways1 <- [];
+	list<road> ways2 <- [];
 	rgb color_fire;
-	
-	
+
 	//caculate lane for intersection
 	action compute_crossing{
-		if(length(roads_in) >= 2){
+		ways1 <- [];
+		ways2 <- [];
+		if(length(roads_in) >= 1){
 			road rd0 <- road(roads_in[0]);
 			list<point> pts <- rd0.shape.points;
 			float ref_angle <- last(pts) direction_to rd0.location;
@@ -199,12 +229,14 @@ species traffic_light skills: [intersection_skill]{
 	}
 	
 	action to_green{	
+		if (length(stop) = 0) { stop << []; }
 		stop[0] <- ways2;
 		color_fire <- #green;
 		is_green <- true;
 	}
 	
 	action to_red{
+		if (length(stop) = 0) { stop << []; }
 		stop[0] <- ways1;
 		color_fire <- #red;
 		is_green <- false;
@@ -223,13 +255,13 @@ species traffic_light skills: [intersection_skill]{
 		}
 	}
 	
-	aspect base {
-		draw sphere(3) color: (is_green ? #green : #red) at: {location.x, location.y, 5};
-		draw cylinder(0.5, 5) color: #black at: {location.x, location.y, 0};
+	aspect default {
 		if (is_traffic_signal) {
+			draw sphere(3) color: (is_green ? #green : #red) at: {location.x, location.y, 5};
+			draw cylinder(0.5, 5) color: #black at: {location.x, location.y, 0};
 			draw circle(1) color: color_fire;
 		} else {
-			draw circle(1) color: color;
+			//draw circle(1) color: color;
 		}
 
 	}
@@ -247,7 +279,7 @@ experiment test type: gui {
 			species motobike;
 			species car;
 			species truck;
-			species traffic_light;
+			species intersection;
 		}
 	}
 }
