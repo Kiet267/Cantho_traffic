@@ -15,4 +15,11 @@
 		<nature>org.eclipse.xtext.ui.shared.xtextNature</nature>
 		<nature>gama.ui.application.gamaNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>external/500x495@2x-8797169666329136208</name>
+			<type>1</type>
+			<locationURI>CACHE_LOC/api.mapbox.com+_++_+styles+_+v1+_+mapbox+_+satellite-v9+_+static+_+%5B105.73987128576191,10.011751003371831,105.78594119773601,10.056777350281836%5D+_+500x495@2x-8797169666329136208</locationURI>
+		</link>
+	</linkedResources>
 </projectDescription>
